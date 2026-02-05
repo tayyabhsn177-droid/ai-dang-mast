@@ -1,15 +1,10 @@
-from utils.game_state import GameState
+from models.game_state import GameState
 from langchain_core.prompts import PromptTemplate
-from utils.logger import (
-    get_logger, 
-    log_performance, 
-    log_game_event, 
-)
-
+from utils.logger import get_logger, log_performance, log_game_event
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
-
 import time
+
 load_dotenv()
 
 # Initialize logger
@@ -17,7 +12,6 @@ ai_logger = get_logger("ai")
 
 model = init_chat_model("gemini-2.5-flash", model_provider="google_genai", temperature=0.7)
 
-# World + Quest Generation
 @log_performance(ai_logger)
 def world_and_quest(input_state: GameState) -> GameState:
     """Generate world introduction and main quest"""
@@ -33,7 +27,6 @@ def world_and_quest(input_state: GameState) -> GameState:
     )
     
     try:
-
         SYSTEM_PROMPT = """You are an expert fantasy storyteller AI. A new player has joined your world.
 
 Based on the following player details, generate a captivating intro:
@@ -42,16 +35,13 @@ Based on the following player details, generate a captivating intro:
 - Setting: {setting}
 - Preferences: {preferences}
 
-Respond with:
-1. 🌍 World Introduction
-2. 🏰 Starting Location Description
-3. 👤 1-2 Key NPCs (name + brief personality)
-4. 🎯 Main Quest Hook (mystery, conflict, or goal)
-"""
-        ai_logger.debug(
-            "Loaded world generation prompt template",
-            extra={"prompt_length": len(SYSTEM_PROMPT)}
-        )
+Respond with exactly 4 sections:
+1. 🌍 World Introduction (2-3 sentences about the world setting)
+2. 🏰 Starting Location Description (2-3 sentences describing where the player begins)
+3. 👤 Key NPCs (1-2 NPCs with name and brief personality)
+4. 🎯 Main Quest Hook (1-2 sentences introducing the main conflict or goal)
+
+Keep each section concise and engaging."""
         
         prompt = PromptTemplate.from_template(SYSTEM_PROMPT)
         formatted_prompt = prompt.format(
@@ -65,7 +55,7 @@ Respond with:
             "Formatted prompt for AI model",
             extra={
                 "formatted_prompt_length": len(formatted_prompt),
-                "model": "deepseek-r1-distill-llama-70b"
+                "model": "gemini-2.5-flash"
             }
         )
         
@@ -98,10 +88,10 @@ Respond with:
             )
         
         updated_state = input_state.model_copy(update={
-            "world_intro": filtered_sections[0] if len(filtered_sections) > 0 else "",
-            "location_intro": filtered_sections[1] if len(filtered_sections) > 1 else "",
-            "npcs": [filtered_sections[2]] if len(filtered_sections) > 2 else [],
-            "main_quest": filtered_sections[3] if len(filtered_sections) > 3 else ""
+            "world_intro": filtered_sections[0] if len(filtered_sections) > 0 else "A mysterious world awaits...",
+            "location_intro": filtered_sections[1] if len(filtered_sections) > 1 else "You find yourself in an unknown place.",
+            "npcs": [filtered_sections[2]] if len(filtered_sections) > 2 else ["A mysterious stranger"],
+            "main_quest": filtered_sections[3] if len(filtered_sections) > 3 else "Your quest begins..."
         })
         
         log_game_event(

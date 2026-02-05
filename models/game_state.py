@@ -89,7 +89,7 @@ class GameState(BaseModel):
     player_name: str = ""
     character_class: str = ""
     
-    # New character progression system
+    # Character progression system
     attributes: Attributes = Field(default_factory=Attributes)
     character_stats: CharacterStats = Field(default_factory=CharacterStats)
     
@@ -118,14 +118,6 @@ class GameState(BaseModel):
     
     # Inventory and items
     inventory: List[str] = []
-    
-    # Legacy fields (keeping for backward compatibility)
-    player_hp: int = 100
-    max_hp: int = 100
-    experience_points: int = 0
-    level: int = 1
-    health_points: int = 100
-    max_health_points: int = 100
     
     # System
     latest_narration: str = ""
@@ -162,14 +154,6 @@ class GameState(BaseModel):
             self.character_stats.stamina_points, 
             self.character_stats.max_stamina_points
         )
-        
-        # Update legacy fields for backward compatibility
-        self.player_hp = self.character_stats.health_points
-        self.max_hp = self.character_stats.max_health_points
-        self.experience_points = self.character_stats.experience_points
-        self.level = self.character_stats.level
-        self.health_points = self.character_stats.health_points
-        self.max_health_points = self.character_stats.max_health_points
     
     def add_experience(self, xp: int) -> bool:
         """Add experience points and return True if leveled up"""
@@ -212,15 +196,11 @@ class GameState(BaseModel):
         """Apply damage to the character and return damage info"""
         # Apply constitution modifier to reduce damage (minimum 1)
         constitution_mod = self.attributes.get_modifier(AttributeType.CONSTITUTION)
-        reduced_damage = max(1, damage + constitution_mod)  # Constitution reduces damage
+        reduced_damage = max(1, damage - constitution_mod)  # Constitution reduces damage
         
         old_hp = self.character_stats.health_points
         self.character_stats.health_points = max(0, self.character_stats.health_points - reduced_damage)
         actual_damage = old_hp - self.character_stats.health_points
-        
-        # Update legacy field
-        self.player_hp = self.character_stats.health_points
-        self.health_points = self.character_stats.health_points
         
         return {
             "damage_dealt": actual_damage,
@@ -238,10 +218,6 @@ class GameState(BaseModel):
             self.character_stats.health_points + healing
         )
         actual_healing = self.character_stats.health_points - old_hp
-        
-        # Update legacy fields
-        self.player_hp = self.character_stats.health_points
-        self.health_points = self.character_stats.health_points
         
         return actual_healing
     
@@ -289,10 +265,6 @@ class GameState(BaseModel):
             self.character_stats.health_points = self.character_stats.max_health_points
             self.character_stats.mana_points = self.character_stats.max_mana_points
             self.character_stats.stamina_points = self.character_stats.max_stamina_points
-            
-            # Update legacy fields
-            self.player_hp = self.character_stats.health_points
-            self.health_points = self.character_stats.health_points
         
         return recovered
     

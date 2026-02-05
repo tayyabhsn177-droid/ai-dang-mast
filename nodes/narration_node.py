@@ -1,13 +1,7 @@
-from utils.game_state import GameState
+from models.game_state import GameState
 from langchain_core.prompts import PromptTemplate
-from utils.logger import (
-    get_logger, 
-    log_performance, 
-    log_game_event, 
-)
-
+from utils.logger import get_logger, log_performance, log_game_event
 from dotenv import load_dotenv
-
 from langchain.chat_models import init_chat_model
 import re
 import time
@@ -19,7 +13,6 @@ ai_logger = get_logger("ai")
 
 model = init_chat_model("gemini-2.5-flash-lite", model_provider="google_genai", temperature=0.7)
 
-# Narration Node
 @log_performance(ai_logger)
 def narration(input_state: GameState) -> GameState:
     """Generate scene narration and available actions"""
@@ -34,7 +27,6 @@ def narration(input_state: GameState) -> GameState:
     )
     
     try:
-
         SYSTEM_PROMPT = """You are a master narrator for a tabletop role-playing game.
 
 Based on the following game data, narrate the current scene for the player:
@@ -48,8 +40,16 @@ Create a vivid, immersive description of:
 - What the NPCs are doing
 - Any important visual or emotional cues
 
-End your narration by offering 2-4 possible actions the player can take.
-Example actions: (Talk to NPC, Explore Area, Inspect Object, Move to Another Place)
+End your narration by offering exactly 4 possible actions the player can take.
+List them as:
+
+Next Possible Actions:
+1. [Action 1]
+2. [Action 2]
+3. [Action 3]
+4. [Action 4]
+
+Example actions: Talk to [NPC], Explore [area], Investigate [object], Rest and recover, Move to [place]
 
 **DO NOT make any decisions for the player.**
 Just narrate and offer choices."""
@@ -90,28 +90,21 @@ Just narrate and offer choices."""
 
         # Extract actions from narration
         matches = re.findall(r'\d+\.\s(.+)', result)
-        actions = [m.strip() for m in matches] or [
-            "Explore further into the ruins",
-            "Return to Eclipse Plaza",
-            "Search for hidden runes",
-            "Set up camp and rest"
-        ]
+        actions = [m.strip() for m in matches][:4]  # Take only first 4
         
-        if not matches:
+        if not actions or len(actions) < 4:
             ai_logger.warning(
-                "No actions found in AI response, using fallback actions",
-                extra={"fallback_actions_count": 4}
+                "Incomplete actions in narration, using fallback",
+                extra={"actions_found": len(actions)}
             )
-        else:
-            ai_logger.debug(
-                "Extracted actions from narration",
-                extra={
-                    "actions_extracted": len(actions),
-                    "actions": actions
-                }
-            )
+            actions = [
+                "Explore further into the ruins",
+                "Talk to nearby NPCs",
+                "Search for hidden items",
+                "Rest and recover"
+            ]
 
-        updated_state = input_state.copy(update={
+        updated_state = input_state.model_copy(update={
             "current_scene": result,
             "available_actions": actions
         })
@@ -123,7 +116,6 @@ Just narrate and offer choices."""
         )
         
         return updated_state
-    
 
     except Exception as e:
         ai_logger.error(

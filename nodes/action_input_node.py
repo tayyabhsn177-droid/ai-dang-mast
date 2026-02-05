@@ -1,17 +1,12 @@
-from utils.game_state import GameState
-from utils.logger import (
-    get_logger, 
-    log_performance, 
-    log_game_event, 
-)
-
+from models.game_state import GameState
+from utils.logger import get_logger, log_performance, log_game_event
 from dotenv import load_dotenv
+
 load_dotenv()
 
 # Initialize loggers
 main_logger = get_logger("game_engine")
 
-# Action Selection Node (UI will handle choosing)
 @log_performance(main_logger)
 def action_input(input_state: GameState) -> GameState:
     """Process player action selection"""

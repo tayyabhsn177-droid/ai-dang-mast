@@ -1,17 +1,24 @@
 # main.py
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from utils.game_state import GameState
+from pydantic import BaseModel, Field
+from models.game_state import GameState, AttributeType
 from utils.logger import init_logging, get_logger
+from services.session_manager import SessionManager
+from typing import Optional
+import asyncio
 
 # Initialize logging first
 init_logging()
 
 from graph_builder import build_graph
 
-app = FastAPI(title="AI Dungeon Master", version="1.0")
+app = FastAPI(
+    title="AI Dungeon Master", 
+    version="2.0",
+    description="AI-powered text RPG with dynamic storytelling"
+)
 
 # Initialize logger
 api_logger = get_logger("api")
@@ -26,25 +33,51 @@ app.add_middleware(
 )
 
 # Build graphs
-graph, action_only_graph, next_turn_graph = build_graph()
+graph, action_only_graph = build_graph()
 
-# Simple in-memory session storage
-game_sessions = {}
+# Session manager (60 min TTL, max 1000 sessions)
+session_manager = SessionManager(ttl_minutes=60, max_sessions=1000)
 
 
 # ============================================================================
-# REQUEST/RESPONSE MODELS (Simplified)
+# REQUEST/RESPONSE MODELS
 # ============================================================================
 
 class StartGameRequest(BaseModel):
-    """Simple request to start a new game"""
-    player_name: str
-    character_class: str = "Warrior"
-    setting: str = "Dark Fantasy Medieval Kingdom"
+    """Request to start a new game"""
+    player_name: str = Field(..., min_length=1, max_length=50, description="Player's name")
+    character_class: str = Field(default="Warrior", description="Character class")
+    setting: str = Field(default="Dark Fantasy Medieval Kingdom", description="Game setting/theme")
+
 
 class ActionRequest(BaseModel):
-    """Simple request to take an action"""
-    action: str
+    """Request to take an action"""
+    action: str = Field(..., min_length=1, description="Action to perform")
+
+
+class AttributeSpendRequest(BaseModel):
+    """Request to spend attribute points"""
+    attribute: AttributeType = Field(..., description="Attribute to increase")
+
+
+# Background task for session cleanup
+async def cleanup_sessions_task():
+    """Periodically cleanup expired sessions"""
+    while True:
+        await asyncio.sleep(300)  # Every 5 minutes
+        removed = session_manager.cleanup_expired()
+        if removed > 0:
+            api_logger.info(
+                f"Background cleanup removed {removed} expired sessions",
+                extra={"sessions_removed": removed, "event": "background_cleanup"}
+            )
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Start background tasks on startup"""
+    asyncio.create_task(cleanup_sessions_task())
+    api_logger.info("Server started, background tasks initialized")
 
 
 # ============================================================================
@@ -55,12 +88,16 @@ class ActionRequest(BaseModel):
 def root():
     """API Welcome"""
     return {
-        "message": "Welcome to AI Dungeon Master!",
+        "message": "Welcome to AI Dungeon Master v2.0!",
         "endpoints": {
             "POST /game/start": "Start a new game",
             "POST /game/{session_id}/action": "Take an action",
-            "GET /game/{session_id}": "Get current game state"
-        }
+            "GET /game/{session_id}": "Get current game state",
+            "GET /game/{session_id}/character": "View character sheet",
+            "POST /game/{session_id}/attribute": "Spend attribute points",
+            "DELETE /game/{session_id}": "End game session"
+        },
+        "active_sessions": session_manager.get_session_count()
     }
 
 
@@ -69,53 +106,77 @@ def start_game(request: StartGameRequest):
     """
     Start a new game session.
     
-    Request body:
-    {
-        "player_name": "YourName",
-        "character_class": "Warrior",  // optional, defaults to Warrior
-        "setting": "Dark Fantasy"      // optional
-    }
+    Creates a character and generates the initial world/quest.
     """
-    import uuid
-    session_id = str(uuid.uuid4())[:8]  # Short session ID
-    
-    api_logger.info(f"Starting new game for {request.player_name}, session: {session_id}")
-    
-    # Create minimal initial state
-    initial_state = GameState(
-        player_name=request.player_name,
-        character_class=request.character_class,
-        setting=request.setting,
-        game_started=False
+    api_logger.info(
+        f"Starting new game for {request.player_name}",
+        extra={
+            "player_name": request.player_name,
+            "character_class": request.character_class,
+            "event": "game_start_request"
+        }
     )
     
-    # Run the initial game graph
-    result = graph.invoke(initial_state)
-    
-    # Convert dict to GameState if needed
-    if isinstance(result, dict):
-        game_state = GameState(**result)
-    else:
-        game_state = result
-    
-    # Store session
-    game_sessions[session_id] = game_state
-    
-    api_logger.info(f"Game started successfully for session {session_id}")
-    
-    return {
-        "session_id": session_id,
-        "message": f"Welcome, {request.player_name}!",
-        "world_intro": game_state.world_intro,
-        "current_scene": game_state.current_scene,
-        "available_actions": game_state.available_actions,
-        "player_stats": {
-            "hp": game_state.health_points,
-            "max_hp": game_state.max_health_points,
-            "level": game_state.level,
-            "inventory": game_state.inventory
+    try:
+        # Create initial state
+        initial_state = GameState(
+            player_name=request.player_name,
+            character_class=request.character_class,
+            setting=request.setting,
+            game_started=False
+        )
+        
+        # CRITICAL FIX: Initialize character stats properly
+        initial_state.update_character_stats()
+        
+        # Run the initial game graph
+        result = graph.invoke(initial_state)
+        
+        # Convert dict to GameState if needed
+        if isinstance(result, dict):
+            game_state = GameState(**result)
+        else:
+            game_state = result
+        
+        # Store session
+        session_id = session_manager.create_session(game_state)
+        
+        api_logger.info(
+            f"Game started successfully for session {session_id}",
+            extra={
+                "session_id": session_id,
+                "player_name": request.player_name,
+                "event": "game_started"
+            }
+        )
+        
+        return {
+            "session_id": session_id,
+            "message": f"Welcome, {request.player_name}!",
+            "world_intro": game_state.world_intro,
+            "current_scene": game_state.current_scene,
+            "available_actions": game_state.available_actions,
+            "player_stats": {
+                "hp": game_state.character_stats.health_points,
+                "max_hp": game_state.character_stats.max_health_points,
+                "mana": game_state.character_stats.mana_points,
+                "max_mana": game_state.character_stats.max_mana_points,
+                "stamina": game_state.character_stats.stamina_points,
+                "max_stamina": game_state.character_stats.max_stamina_points,
+                "level": game_state.character_stats.level,
+                "xp": game_state.character_stats.experience_points,
+                "xp_to_next": game_state.character_stats.experience_to_next_level,
+                "inventory": game_state.inventory
+            }
         }
-    }
+    
+    except Exception as e:
+        api_logger.error(
+            f"Failed to start game: {str(e)}",
+            exc_info=True,
+            extra={"error_type": type(e).__name__, "event": "game_start_failed"}
+        )
+        raise HTTPException(status_code=500, detail=f"Failed to start game: {str(e)}")
 
 
 @app.post("/game/{session_id}/action")
@@ -123,86 +184,126 @@ def take_action(session_id: str, request: ActionRequest):
     """
     Take an action in your game.
     
-    Request body:
-    {
-        "action": "Explore the cave"
-    }
-    
-    Returns updated game state with new scene and actions.
+    Validates the action, rolls dice with attribute modifiers, 
+    resolves consequences, and returns updated game state.
     """
     # Check if session exists
-    if session_id not in game_sessions:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-    
-    current_state = game_sessions[session_id]
+    current_state = session_manager.get_session(session_id)
+    if not current_state:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Session {session_id} not found or expired"
+        )
     
     # Check if game is over
-    if current_state.health_points <= 0:
+    if current_state.character_stats.health_points <= 0:
+        api_logger.info(f"Attempted action on dead character in session {session_id}")
         return {
             "game_over": True,
             "message": "You have fallen! Your journey ends here.",
             "final_stats": {
-                "level": current_state.level,
-                "experience": current_state.experience_points,
+                "level": current_state.character_stats.level,
+                "experience": current_state.character_stats.experience_points,
                 "inventory": current_state.inventory
             }
         }
     
-    api_logger.info(f"Session {session_id}: Player action: {request.action}")
+    # Validate action is in available actions (optional but recommended)
+    if request.action not in current_state.available_actions:
+        api_logger.warning(
+            f"Action '{request.action}' not in available actions",
+            extra={
+                "session_id": session_id,
+                "action": request.action,
+                "available_actions": current_state.available_actions,
+                "event": "invalid_action"
+            }
+        )
+        # Allow it anyway for flexibility, but log it
     
-    # Update state with selected action
-    current_state.selected_action = request.action
+    api_logger.info(
+        f"Session {session_id}: Player action: {request.action}",
+        extra={
+            "session_id": session_id,
+            "action": request.action,
+            "event": "action_request"
+        }
+    )
     
-    # Run action resolution
-    result = action_only_graph.invoke(current_state)
-    
-    # Convert to GameState
-    if isinstance(result, dict):
-        new_state = GameState(**result)
-    else:
-        new_state = result
-    
-    # Update session
-    game_sessions[session_id] = new_state
-    
-    # Check for game over
-    if new_state.health_points <= 0:
-        api_logger.info(f"Game over for session {session_id}")
+    try:
+        # Update state with selected action
+        current_state.selected_action = request.action
+        
+        # Run action resolution
+        result = action_only_graph.invoke(current_state)
+        
+        # Convert to GameState
+        if isinstance(result, dict):
+            new_state = GameState(**result)
+        else:
+            new_state = result
+        
+        # Update session
+        session_manager.update_session(session_id, new_state)
+        
+        # Check for game over
+        if new_state.character_stats.health_points <= 0:
+            api_logger.info(f"Game over for session {session_id}")
+            return {
+                "game_over": True,
+                "message": "You have fallen! Your journey ends here.",
+                "death_scene": new_state.current_scene,
+                "final_stats": {
+                    "level": new_state.character_stats.level,
+                    "experience": new_state.character_stats.experience_points,
+                    "inventory": new_state.inventory
+                }
+            }
+        
+        # Return detailed response
         return {
-            "game_over": True,
-            "message": "You have fallen! Your journey ends here.",
-            "death_scene": new_state.current_scene,
-            "final_stats": {
-                "level": new_state.level,
-                "experience": new_state.experience_points,
+            "session_id": session_id,
+            "current_scene": new_state.current_scene,
+            "available_actions": new_state.available_actions,
+            "dice_roll": new_state.last_dice_roll,
+            "outcome": new_state.last_roll_outcome,
+            "player_stats": {
+                "hp": new_state.character_stats.health_points,
+                "max_hp": new_state.character_stats.max_health_points,
+                "mana": new_state.character_stats.mana_points,
+                "max_mana": new_state.character_stats.max_mana_points,
+                "stamina": new_state.character_stats.stamina_points,
+                "max_stamina": new_state.character_stats.max_stamina_points,
+                "level": new_state.character_stats.level,
+                "xp": new_state.character_stats.experience_points,
+                "xp_to_next": new_state.character_stats.experience_to_next_level,
                 "inventory": new_state.inventory
             }
         }
     
-    # Return simplified response for continuous play
-    return {
-        "session_id": session_id,
-        "current_scene": new_state.current_scene,
-        "available_actions": new_state.available_actions,
-        "dice_roll": new_state.last_dice_roll,
-        "outcome": new_state.last_roll_outcome,
-        "player_stats": {
-            "hp": new_state.health_points,
-            "max_hp": new_state.max_health_points,
-            "level": new_state.level,
-            "xp": new_state.experience_points,
-            "inventory": new_state.inventory
-        }
-    }
+    except Exception as e:
+        api_logger.error(
+            f"Failed to process action: {str(e)}",
+            exc_info=True,
+            extra={
+                "session_id": session_id,
+                "action": request.action,
+                "error_type": type(e).__name__,
+                "event": "action_failed"
+            }
+        )
+        raise HTTPException(status_code=500, detail=f"Failed to process action: {str(e)}")
 
 
 @app.get("/game/{session_id}")
 def get_game_state(session_id: str):
     """Get the current state of your game"""
-    if session_id not in game_sessions:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-    
-    state = game_sessions[session_id]
+    state = session_manager.get_session(session_id)
+    if not state:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Session {session_id} not found or expired"
+        )
     
     return {
         "session_id": session_id,
@@ -211,28 +312,172 @@ def get_game_state(session_id: str):
         "current_scene": state.current_scene,
         "available_actions": state.available_actions,
         "player_stats": {
-            "hp": state.health_points,
-            "max_hp": state.max_health_points,
-            "level": state.level,
-            "xp": state.experience_points,
+            "hp": state.character_stats.health_points,
+            "max_hp": state.character_stats.max_health_points,
+            "mana": state.character_stats.mana_points,
+            "max_mana": state.character_stats.max_mana_points,
+            "stamina": state.character_stats.stamina_points,
+            "max_stamina": state.character_stats.max_stamina_points,
+            "level": state.character_stats.level,
+            "xp": state.character_stats.experience_points,
+            "xp_to_next": state.character_stats.experience_to_next_level,
             "inventory": state.inventory
         },
         "quest_info": {
             "main_quest": state.main_quest,
             "side_quests": state.side_quests
         },
-        "game_over": state.health_points <= 0
+        "game_over": state.character_stats.health_points <= 0
+    }
+
+
+@app.get("/game/{session_id}/character")
+def get_character_sheet(session_id: str):
+    """View detailed character sheet with attributes"""
+    state = session_manager.get_session(session_id)
+    if not state:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Session {session_id} not found or expired"
+        )
+    
+    modifiers = state.attributes.get_all_modifiers()
+    
+    return {
+        "session_id": session_id,
+        "player_name": state.player_name,
+        "character_class": state.character_class,
+        "level": state.character_stats.level,
+        "experience": {
+            "current": state.character_stats.experience_points,
+            "to_next_level": state.character_stats.experience_to_next_level,
+            "percentage": round(
+                (state.character_stats.experience_points / state.character_stats.experience_to_next_level) * 100, 
+                1
+            )
+        },
+        "attributes": {
+            "strength": {
+                "value": state.attributes.strength,
+                "modifier": modifiers["strength"]
+            },
+            "dexterity": {
+                "value": state.attributes.dexterity,
+                "modifier": modifiers["dexterity"]
+            },
+            "constitution": {
+                "value": state.attributes.constitution,
+                "modifier": modifiers["constitution"]
+            },
+            "intelligence": {
+                "value": state.attributes.intelligence,
+                "modifier": modifiers["intelligence"]
+            },
+            "wisdom": {
+                "value": state.attributes.wisdom,
+                "modifier": modifiers["wisdom"]
+            },
+            "charisma": {
+                "value": state.attributes.charisma,
+                "modifier": modifiers["charisma"]
+            }
+        },
+        "resources": {
+            "health": {
+                "current": state.character_stats.health_points,
+                "max": state.character_stats.max_health_points,
+                "percentage": round(state.character_stats.get_health_percentage() * 100, 1)
+            },
+            "mana": {
+                "current": state.character_stats.mana_points,
+                "max": state.character_stats.max_mana_points,
+                "percentage": round(state.character_stats.get_mana_percentage() * 100, 1)
+            },
+            "stamina": {
+                "current": state.character_stats.stamina_points,
+                "max": state.character_stats.max_stamina_points,
+                "percentage": round(state.character_stats.get_stamina_percentage() * 100, 1)
+            }
+        },
+        "available_points": {
+            "attribute_points": state.character_stats.available_attribute_points,
+            "skill_points": state.character_stats.available_skill_points
+        },
+        "inventory": state.inventory,
+        "summary": state.get_character_summary()
+    }
+
+
+@app.post("/game/{session_id}/attribute")
+def spend_attribute_point(session_id: str, request: AttributeSpendRequest):
+    """Spend an attribute point to increase an attribute"""
+    state = session_manager.get_session(session_id)
+    if not state:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Session {session_id} not found or expired"
+        )
+    
+    # Try to spend the point
+    success = state.spend_attribute_point(request.attribute)
+    
+    if not success:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot increase {request.attribute.value}. Either no points available or attribute is at max (20)."
+        )
+    
+    # Update session
+    session_manager.update_session(session_id, state)
+    
+    api_logger.info(
+        f"Attribute point spent in session {session_id}",
+        extra={
+            "session_id": session_id,
+            "attribute": request.attribute.value,
+            "new_value": getattr(state.attributes, request.attribute.value),
+            "remaining_points": state.character_stats.available_attribute_points,
+            "event": "attribute_increased"
+        }
+    )
+    
+    modifiers = state.attributes.get_all_modifiers()
+    
+    return {
+        "success": True,
+        "attribute": request.attribute.value,
+        "new_value": getattr(state.attributes, request.attribute.value),
+        "new_modifier": modifiers[request.attribute.value],
+        "remaining_attribute_points": state.character_stats.available_attribute_points,
+        "updated_stats": {
+            "max_hp": state.character_stats.max_health_points,
+            "max_mana": state.character_stats.max_mana_points,
+            "max_stamina": state.character_stats.max_stamina_points
+        }
     }
 
 
 @app.delete("/game/{session_id}")
 def end_game(session_id: str):
     """End your game session"""
-    if session_id in game_sessions:
-        del game_sessions[session_id]
-        api_logger.info(f"Session {session_id} deleted")
-        return {"message": "Game session ended"}
-    raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    if session_manager.delete_session(session_id):
+        return {
+            "message": "Game session ended",
+            "session_id": session_id
+        }
+    raise HTTPException(
+        status_code=404, 
+        detail=f"Session {session_id} not found"
+    )
 
 
-# uvicorn main:app --reload
+@app.get("/health")
+def health_check():
+    """Health check endpoint for monitoring"""
+    return {
+        "status": "healthy",
+        "active_sessions": session_manager.get_session_count()
+    }
+
+
+# uvicorn main:app --reload --host 0.0.0.0 --port 8000

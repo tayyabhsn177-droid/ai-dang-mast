@@ -1,5 +1,5 @@
 from langgraph.graph import StateGraph, END
-from utils.game_state import GameState
+from models.game_state import GameState
 from utils.logger import get_logger
 
 # Initialize logger
@@ -50,12 +50,13 @@ def build_graph():
             }
         )
 
-        # Build mini graph for action resolution only (for /choose-action endpoint)
-        mini_builder = StateGraph(GameState)
-        mini_builder.add_node("action_resolution", action_resolution)
-        mini_builder.add_edge("action_resolution", END)
-        mini_builder.set_entry_point("action_resolution")
-        action_only_graph = mini_builder.compile()
+        # Build action-only graph (for action resolution during gameplay)
+        # FIXED: Removed duplicate next_turn_graph - just use action_only_graph
+        action_builder = StateGraph(GameState)
+        action_builder.add_node("action_resolution", action_resolution)
+        action_builder.add_edge("action_resolution", END)
+        action_builder.set_entry_point("action_resolution")
+        action_only_graph = action_builder.compile()
         
         main_logger.debug(
             "Action-only graph compiled successfully",
@@ -65,32 +66,15 @@ def build_graph():
             }
         )
 
-        # Build graph for continuing turns (for /next-turn endpoint)
-        # This runs: action_resolution only (since narration happens based on previous action)
-        # The flow should be: user sends state with selected_action -> resolve action -> return new state
-        next_turn_builder = StateGraph(GameState)
-        next_turn_builder.add_node("action_resolution", action_resolution)
-        next_turn_builder.add_edge("action_resolution", END)
-        next_turn_builder.set_entry_point("action_resolution")
-        next_turn_graph = next_turn_builder.compile()
-        
-        main_logger.debug(
-            "Next-turn graph compiled successfully",
-            extra={
-                "nodes": ["action_resolution"],
-                "event": "next_turn_graph_compiled"
-            }
-        )
-
         main_logger.info(
             "All game workflow graphs built successfully",
             extra={
-                "graphs_built": ["main", "action_only", "next_turn"],
+                "graphs_built": ["main", "action_only"],
                 "event": "graph_building_complete"
             }
         )
 
-        return graph, action_only_graph, next_turn_graph
+        return graph, action_only_graph
         
     except Exception as e:
         main_logger.error(

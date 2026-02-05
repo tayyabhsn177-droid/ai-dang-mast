@@ -1,17 +1,12 @@
-from utils.game_state import GameState
-from utils.logger import (
-    get_logger, 
-    log_performance, 
-    log_game_event, 
-)
-
+from models.game_state import GameState
+from utils.logger import get_logger, log_performance, log_game_event
 from dotenv import load_dotenv
+
 load_dotenv()
 
 # Initialize logger
 main_logger = get_logger("game_engine")
 
-# Session Start Node
 @log_performance(main_logger)
 def start_session(input_state: GameState) -> GameState:
     """Initialize a new game session"""
@@ -39,7 +34,7 @@ def start_session(input_state: GameState) -> GameState:
         "Game session initialized successfully",
         extra={
             "game_started": True,
-            "player_hp": updated_state.health_points,
+            "player_hp": updated_state.character_stats.health_points,
             "event": "session_initialized"
         }
     )

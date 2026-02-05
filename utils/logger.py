@@ -100,7 +100,7 @@ def setup_logging(config_path: Optional[str] = None,
                 },
                 "file": {
                     "class": "logging.handlers.RotatingFileHandler",
-                    "level": "DEBUG",
+                    "level": "INFO",  # Changed from DEBUG to reduce verbosity
                     "formatter": "json",
                     "filters": ["correlation"],
                     "filename": "logs/dungeon_master.log",
@@ -119,7 +119,7 @@ def setup_logging(config_path: Optional[str] = None,
             },
             "loggers": {
                 "dungeon_master": {
-                    "level": "DEBUG",
+                    "level": "INFO",  # Changed from DEBUG
                     "handlers": ["console", "file", "error_file"],
                     "propagate": False
                 },
@@ -285,6 +285,3 @@ def init_logging():
         log_level=log_level,
         environment=environment
     )
-
-# DO NOT auto-initialize - this causes circular imports
-# The main application (main.py) should call init_logging() explicitly
