@@ -274,7 +274,6 @@ def sanitize_sensitive_data(data: Dict[str, Any]) -> Dict[str, Any]:
     
     return sanitized
 
-# Initialize logging on module import
 def init_logging():
     """Initialize logging with environment-based configuration"""
     environment = os.getenv("ENVIRONMENT", "development")
@@ -287,5 +286,5 @@ def init_logging():
         environment=environment
     )
 
-# Auto-initialize when module is imported
-init_logging()
+# DO NOT auto-initialize - this causes circular imports
+# The main application (main.py) should call init_logging() explicitly

@@ -21,7 +21,7 @@ load_dotenv()
 main_logger = get_logger("game_engine")
 ai_logger = get_logger("ai")
 
-model = init_chat_model("gemini-2.5-flash_lite", model_provider="google_genai", temperature=0.7)
+model = init_chat_model("gemini-2.5-flash-lite", model_provider="google_genai", temperature=0.7)
 
 
 # Action Resolution Node
@@ -170,13 +170,18 @@ Important Guidelines:
                 }
             )
 
-        updated_state = input_state.copy(update={
+        # Use model_copy instead of copy to return GameState
+        updated_state = input_state.model_copy(update={
             "action_result": result,
             "new_available_actions": new_actions,
             "last_dice_roll": dice_result,
             "last_roll_outcome": roll_outcome,
             "inventory": updated_inventory,
-            "health_points": updated_hp
+            "health_points": updated_hp,
+            "player_hp": updated_hp,  # Keep legacy field in sync
+            "current_scene": result,  # Update current scene with action result
+            "available_actions": new_actions,  # Update available actions
+            "selected_action": ""  # Clear selected action for next turn
         })
         
         # Log the complete action resolution

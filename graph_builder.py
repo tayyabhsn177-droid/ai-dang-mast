@@ -20,7 +20,7 @@ def build_graph():
     )
 
     try:
-        # Initialize main graph
+        # Initialize main graph (full game start)
         builder = StateGraph(GameState)
 
         # Add nodes
@@ -50,7 +50,7 @@ def build_graph():
             }
         )
 
-        # Build mini graph for action resolution only
+        # Build mini graph for action resolution only (for /choose-action endpoint)
         mini_builder = StateGraph(GameState)
         mini_builder.add_node("action_resolution", action_resolution)
         mini_builder.add_edge("action_resolution", END)
@@ -65,22 +65,19 @@ def build_graph():
             }
         )
 
-        # Build graph for continuing turns
-        next_turn_graph = StateGraph(GameState)
-        next_turn_graph.add_node("narration", narration)
-        next_turn_graph.add_node("action_input", action_input)
-        next_turn_graph.add_node("action_resolution", action_resolution)
-
-        next_turn_graph.add_edge("narration", "action_input")
-        next_turn_graph.add_edge("action_input", "action_resolution")
-
-        next_turn_graph.set_entry_point("narration")
-        next_turn_graph.set_finish_point("action_resolution")
+        # Build graph for continuing turns (for /next-turn endpoint)
+        # This runs: action_resolution only (since narration happens based on previous action)
+        # The flow should be: user sends state with selected_action -> resolve action -> return new state
+        next_turn_builder = StateGraph(GameState)
+        next_turn_builder.add_node("action_resolution", action_resolution)
+        next_turn_builder.add_edge("action_resolution", END)
+        next_turn_builder.set_entry_point("action_resolution")
+        next_turn_graph = next_turn_builder.compile()
         
         main_logger.debug(
             "Next-turn graph compiled successfully",
             extra={
-                "nodes": ["narration", "action_input", "action_resolution"],
+                "nodes": ["action_resolution"],
                 "event": "next_turn_graph_compiled"
             }
         )
