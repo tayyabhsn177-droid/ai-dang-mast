@@ -1,0 +1,144 @@
+{
+  "version": 1,
+  "disable_existing_loggers": false,
+  "formatters": {
+    "json": {
+      "()": "utils.logger.JSONFormatter"
+    },
+    "console": {
+      "format": "%(asctime)s - %(name)s - %(levelname)s - %(correlation_id)s - %(message)s",
+      "datefmt": "%Y-%m-%d %H:%M:%S"
+    },
+    "detailed": {
+      "format": "%(asctime)s - %(name)s - %(levelname)s - %(module)s:%(lineno)d - %(correlation_id)s - %(message)s",
+      "datefmt": "%Y-%m-%d %H:%M:%S"
+    }
+  },
+  "filters": {
+    "correlation": {
+      "()": "utils.logger.ContextFilter"
+    }
+  },
+  "handlers": {
+    "console": {
+      "class": "logging.StreamHandler",
+      "level": "INFO",
+      "formatter": "console",
+      "filters": ["correlation"],
+      "stream": "ext://sys.stdout"
+    },
+    "debug_console": {
+      "class": "logging.StreamHandler",
+      "level": "DEBUG",
+      "formatter": "detailed",
+      "filters": ["correlation"],
+      "stream": "ext://sys.stdout"
+    },
+    "app_file": {
+      "class": "logging.handlers.RotatingFileHandler",
+      "level": "DEBUG",
+      "formatter": "json",
+      "filters": ["correlation"],
+      "filename": "logs/dungeon_master.log",
+      "maxBytes": 10485760,
+      "backupCount": 5,
+      "encoding": "utf8"
+    },
+    "error_file": {
+      "class": "logging.handlers.RotatingFileHandler",
+      "level": "ERROR",
+      "formatter": "json",
+      "filters": ["correlation"],
+      "filename": "logs/errors.log",
+      "maxBytes": 10485760,
+      "backupCount": 3,
+      "encoding": "utf8"
+    },
+    "api_file": {
+      "class": "logging.handlers.RotatingFileHandler",
+      "level": "INFO",
+      "formatter": "json",
+      "filters": ["correlation"],
+      "filename": "logs/api.log",
+      "maxBytes": 10485760,
+      "backupCount": 5,
+      "encoding": "utf8"
+    },
+    "game_events_file": {
+      "class": "logging.handlers.RotatingFileHandler",
+      "level": "INFO",
+      "formatter": "json",
+      "filters": ["correlation"],
+      "filename": "logs/game_events.log",
+      "maxBytes": 10485760,
+      "backupCount": 5,
+      "encoding": "utf8"
+    },
+    "performance_file": {
+      "class": "logging.handlers.RotatingFileHandler",
+      "level": "DEBUG",
+      "formatter": "json",
+      "filters": ["correlation"],
+      "filename": "logs/performance.log",
+      "maxBytes": 10485760,
+      "backupCount": 3,
+      "encoding": "utf8"
+    }
+  },
+  "loggers": {
+    "dungeon_master.api": {
+      "level": "INFO",
+      "handlers": ["console", "api_file", "error_file"],
+      "propagate": false
+    },
+    "dungeon_master.game_engine": {
+      "level": "DEBUG",
+      "handlers": ["console", "app_file", "error_file"],
+      "propagate": false
+    },
+    "dungeon_master.ai": {
+      "level": "INFO",
+      "handlers": ["console", "app_file", "error_file"],
+      "propagate": false
+    },
+    "dungeon_master.voice": {
+      "level": "INFO",
+      "handlers": ["console", "app_file", "error_file"],
+      "propagate": false
+    },
+    "dungeon_master.inventory": {
+      "level": "DEBUG",
+      "handlers": ["console", "app_file", "error_file"],
+      "propagate": false
+    },
+    "dungeon_master.dice": {
+      "level": "DEBUG",
+      "handlers": ["console", "app_file", "error_file"],
+      "propagate": false
+    },
+    "dungeon_master.game_events": {
+      "level": "INFO",
+      "handlers": ["console", "game_events_file", "error_file"],
+      "propagate": false
+    },
+    "dungeon_master.performance": {
+      "level": "DEBUG",
+      "handlers": ["performance_file"],
+      "propagate": false
+    },
+    "uvicorn.error": {
+      "level": "INFO",
+      "handlers": ["console", "error_file"],
+      "propagate": false
+    },
+    "uvicorn.access": {
+      "level": "INFO",
+      "handlers": ["api_file"],
+      "propagate": false
+    }
+  },
+  "root": {
+    "level": "INFO",
+    "handlers": ["console"]
+  }
+}

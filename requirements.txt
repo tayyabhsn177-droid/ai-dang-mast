@@ -1,0 +1,9 @@
+elevenlabs
+langgraph
+langchain
+python-dotenv
+langchain-groq
+pydantic
+fastapi
+fastapi[all]
+uvicorn[standard]
