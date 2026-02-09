@@ -123,6 +123,10 @@ class GameState(BaseModel):
     latest_narration: str = ""
     voice_output_disabled: bool = False
     
+    # Combat
+    in_combat: bool = False
+    status_effects: List[Dict[str, Any]] = []
+    
     def update_character_stats(self):
         """Update character stats based on attributes and level"""
         modifiers = self.attributes.get_all_modifiers()
@@ -267,6 +271,74 @@ class GameState(BaseModel):
             self.character_stats.stamina_points = self.character_stats.max_stamina_points
         
         return recovered
+    
+    # Status effect methods
+    def add_status_effect(self, effect_name: str, duration: int, **kwargs):
+        """Add a status effect to the player"""
+        effect = {
+            "name": effect_name,
+            "duration": duration,
+            "applied_turn": 0,
+            **kwargs
+        }
+        self.status_effects.append(effect)
+    
+    def update_status_effects(self) -> List[Dict[str, Any]]:
+        """Update status effect durations and remove expired ones"""
+        effects_triggered = []
+        
+        remaining_effects = []
+        for effect in self.status_effects:
+            effect["duration"] -= 1
+            
+            # Trigger effect
+            effect_result = self._trigger_status_effect(effect)
+            if effect_result:
+                effects_triggered.append(effect_result)
+            
+            # Keep effect if duration > 0
+            if effect["duration"] > 0:
+                remaining_effects.append(effect)
+        
+        self.status_effects = remaining_effects
+        return effects_triggered
+    
+    def _trigger_status_effect(self, effect: Dict[str, Any]) -> Dict[str, Any]:
+        """Trigger a status effect's impact"""
+        effect_name = effect["name"]
+        
+        if effect_name == "poisoned":
+            damage = effect.get("damage_per_turn", 3)
+            result = self.take_damage(damage)
+            return {
+                "effect": "poisoned",
+                "target": "player",
+                "damage": result["damage_dealt"]
+            }
+        
+        elif effect_name == "bleeding":
+            damage = effect.get("damage_per_turn", 5)
+            result = self.take_damage(damage)
+            return {
+                "effect": "bleeding",
+                "target": "player",
+                "damage": result["damage_dealt"]
+            }
+        
+        elif effect_name == "regenerating":
+            healing = effect.get("healing_per_turn", 5)
+            actual_healing = self.heal(healing)
+            return {
+                "effect": "regenerating",
+                "target": "player",
+                "healing": actual_healing
+            }
+        
+        return {}
+    
+    def has_status_effect(self, effect_name: str) -> bool:
+        """Check if player has a specific status effect"""
+        return any(effect["name"] == effect_name for effect in self.status_effects)
     
     def get_character_summary(self) -> str:
         """Get a formatted character summary for display"""

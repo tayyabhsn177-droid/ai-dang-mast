@@ -8,6 +8,9 @@ from utils.logger import init_logging, get_logger
 from services.session_manager import SessionManager
 from typing import Optional
 import asyncio
+from models.enemy import spawn_random_enemy, create_dragon_boss, create_necromancer, create_orc, create_goblin
+from services.combat_system import CombatSystem
+
 
 # Initialize logging first
 init_logging()
@@ -37,6 +40,8 @@ graph, action_only_graph = build_graph()
 
 # Session manager (60 min TTL, max 1000 sessions)
 session_manager = SessionManager(ttl_minutes=60, max_sessions=1000)
+
+combat_systems = {}  # session_id -> CombatSystem
 
 
 # ============================================================================
@@ -480,4 +485,214 @@ def health_check():
     }
 
 
-# uvicorn main:app --reload --host 0.0.0.0 --port 8000
+# uvicorn main:app --reload 
+
+from fastapi import HTTPException
+from pydantic import BaseModel, Field
+from typing import Optional
+
+class StartCombatRequest(BaseModel):
+    """Request to start a combat encounter"""
+    enemy_type: Optional[str] = Field(None, description="Specific enemy type or 'random' or 'boss'")
+    enemy_level: Optional[int] = Field(1, ge=1, le=20, description="Enemy level")
+    enemy_count: Optional[int] = Field(1, ge=1, le=5, description="Number of enemies")
+
+class CombatActionRequest(BaseModel):
+    """Request to perform a combat action"""
+    action_type: str = Field(..., description="attack, ability, defend, item, flee")
+    target_index: Optional[int] = Field(0, description="Index of enemy target")
+    ability_name: Optional[str] = Field(None, description="Name of ability to use")
+    item_name: Optional[str] = Field(None, description="Name of item to use")
+
+
+
+# ==================== PASTE THESE INTO main.py ====================
+
+
+@app.post("/game/{session_id}/combat/start")
+def start_combat(session_id: str, request: StartCombatRequest):
+    '''
+    Start a combat encounter.
+    
+    Creates enemies and initiates turn-based combat.
+    '''
+    state = session_manager.get_session(session_id)
+    if not state:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    
+    if state.in_combat:
+        raise HTTPException(status_code=400, detail="Already in combat")
+    
+    # Create combat system for this session
+    if session_id not in combat_systems:
+        combat_systems[session_id] = CombatSystem()
+    
+    combat_system = combat_systems[session_id]
+    
+    # Create enemies
+    enemies = []
+    
+    if request.enemy_type == "boss":
+        enemies.append(create_dragon_boss(level=request.enemy_level))
+    elif request.enemy_type == "random":
+        for _ in range(request.enemy_count):
+            enemies.append(spawn_random_enemy(difficulty=request.enemy_level))
+    else:
+        # Specific enemy type
+        enemy_creators = {
+            "goblin": create_goblin,
+            "orc": create_orc,
+            "necromancer": create_necromancer,
+        }
+        
+        creator = enemy_creators.get(request.enemy_type)
+        if creator:
+            for _ in range(request.enemy_count):
+                enemies.append(creator(level=request.enemy_level))
+        else:
+            # Use spawn_random_enemy which takes 'difficulty' not 'level'
+            for _ in range(request.enemy_count):
+                enemies.append(spawn_random_enemy(difficulty=request.enemy_level))
+    
+    # Start combat
+    result = combat_system.start_combat(state, enemies)
+    
+    state.in_combat = True
+    session_manager.update_session(session_id, state)
+    
+    api_logger.info(
+        f"Combat started in session {session_id}",
+        extra={
+            "session_id": session_id,
+            "enemy_count": len(enemies),
+            "event": "combat_initiated"
+        }
+    )
+    
+    return {
+        "session_id": session_id,
+        **result,
+        "available_actions": [
+            "Attack",
+            "Use Ability",
+            "Defend",
+            "Use Item",
+            "Flee"
+        ]
+    }
+
+
+@app.post("/game/{session_id}/combat/action")
+def perform_combat_action(session_id: str, request: CombatActionRequest):
+    '''
+    Perform an action in combat.
+    
+    Executes player action, then enemy turns, updates status effects.
+    '''
+    state = session_manager.get_session(session_id)
+    if not state:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    
+    if not state.in_combat:
+        raise HTTPException(status_code=400, detail="Not in combat")
+    
+    if session_id not in combat_systems:
+        raise HTTPException(status_code=500, detail="Combat system not initialized")
+    
+    combat_system = combat_systems[session_id]
+    
+    # Perform action based on type
+    try:
+        if request.action_type == "attack":
+            result = combat_system.player_attack(state, request.target_index)
+        
+        elif request.action_type == "ability":
+            if not request.ability_name:
+                raise HTTPException(status_code=400, detail="ability_name required")
+            result = combat_system.player_use_ability(
+                state, 
+                request.ability_name, 
+                request.target_index
+            )
+        
+        elif request.action_type == "defend":
+            result = combat_system.player_defend(state)
+        
+        elif request.action_type == "item":
+            if not request.item_name:
+                raise HTTPException(status_code=400, detail="item_name required")
+            result = combat_system.player_use_item(state, request.item_name)
+        
+        elif request.action_type == "flee":
+            result = combat_system.player_flee(state)
+        
+        else:
+            raise HTTPException(status_code=400, detail=f"Invalid action type: {request.action_type}")
+        
+        # Update session
+        if result.get("combat_ended"):
+            state.in_combat = False
+            if session_id in combat_systems:
+                del combat_systems[session_id]
+        
+        session_manager.update_session(session_id, state)
+        
+        return {
+            "session_id": session_id,
+            **result
+        }
+    
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/game/{session_id}/combat/status")
+def get_combat_status(session_id: str):
+    '''Get current combat status'''
+    state = session_manager.get_session(session_id)
+    if not state:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    
+    if not state.in_combat:
+        return {
+            "in_combat": False,
+            "message": "Not currently in combat"
+        }
+    
+    if session_id not in combat_systems:
+        raise HTTPException(status_code=500, detail="Combat system not initialized")
+    
+    combat_system = combat_systems[session_id]
+    
+    return {
+        "in_combat": True,
+        "enemies": [combat_system._enemy_to_dict(e) for e in combat_system.enemies if e.is_alive],
+        "player_stats": combat_system._player_stats_dict(state),
+        "combat_log": combat_system.combat_log.get_last_n_events(20),
+        "turn_order": combat_system.turn_order,
+        "available_abilities": [
+            {"name": "Power Strike", "stamina_cost": 15, "damage": "High"},
+            {"name": "Fireball", "mana_cost": 20, "damage": "Very High", "element": "fire"},
+            {"name": "Heal", "mana_cost": 25, "effect": "Restore HP"}
+        ]
+    }
+
+
+@app.post("/game/{session_id}/combat/end")
+def force_end_combat(session_id: str):
+    '''Force end combat (debug/admin endpoint)'''
+    state = session_manager.get_session(session_id)
+    if not state:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    
+    if session_id in combat_systems:
+        combat_systems[session_id].end_combat(state)
+        del combat_systems[session_id]
+    
+    state.in_combat = False
+    session_manager.update_session(session_id, state)
+    
+    return {
+        "message": "Combat ended",
+        "session_id": session_id
+    }
