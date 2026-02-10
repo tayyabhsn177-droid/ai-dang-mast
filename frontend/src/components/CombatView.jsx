@@ -78,7 +78,11 @@ function CombatView({ sessionId, onCombatEnd }) {
         return;
       }
 
-      setCombatData(response);
+      // CRITICAL FIX: Ensure in_combat flag is preserved
+      setCombatData({
+        ...response,
+        in_combat: true // Always set to true if combat hasn't ended
+      });
       setSelectedAbility(null);
 
     } catch (err) {

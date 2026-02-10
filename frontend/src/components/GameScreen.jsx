@@ -1,13 +1,13 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { gameApi } from '../services/api';
-import CombatView from './CombatView';
+import { ArrowLeft, Menu } from 'lucide-react';
 
-
-function GameScreen({ sessionId, initialGameData }) {
+function GameScreen({ sessionId, initialGameData, onCombatStart }) {
+    const navigate = useNavigate();
     const [gameData, setGameData] = useState(initialGameData);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState(null);
-    const [inCombat, setInCombat] = useState(false);
 
     const handleAction = async (action) => {
         setIsLoading(true);
@@ -22,7 +22,7 @@ function GameScreen({ sessionId, initialGameData }) {
             // Check for game over
             if (response.game_over) {
                 alert(`Game Over!\n\n${response.message}\n\nFinal Level: ${response.final_stats?.level || 'N/A'}`);
-                window.location.reload(); // Restart game
+                navigate('/');
                 return;
             }
 
@@ -47,25 +47,20 @@ function GameScreen({ sessionId, initialGameData }) {
     const handleStartCombat = async () => {
         try {
             await gameApi.startCombat(sessionId, 'random', 1, 1);
-            setInCombat(true);
+            onCombatStart();
+            navigate('/combat');
         } catch (err) {
             console.error('Failed to start combat:', err);
             setError('Failed to start combat');
         }
     };
 
-    const handleCombatEnd = () => {
-        setInCombat(false);
-        // Refresh game state
-        window.location.reload();
+    const handleBackToHome = () => {
+        if (window.confirm('Are you sure you want to end your adventure?')) {
+            navigate('/');
+        }
     };
 
-    // Show combat view if in combat
-    if (inCombat) {
-        return <CombatView sessionId={sessionId} onCombatEnd={handleCombatEnd} />;
-    }
-
-    // Otherwise show normal game screen
     return (
         <div className="min-h-screen bg-fantasy-dark text-white p-4">
             <div className="max-w-6xl mx-auto">
@@ -73,9 +68,17 @@ function GameScreen({ sessionId, initialGameData }) {
                 {/* Header */}
                 <div className="bg-fantasy-darker rounded-lg p-4 mb-4 border border-gray-800">
                     <div className="flex justify-between items-center">
-                        <h1 className="text-2xl font-bold text-fantasy-gold">
-                            🎲 AI Dungeon Master
-                        </h1>
+                        <div className="flex items-center gap-4">
+                            <button
+                                onClick={handleBackToHome}
+                                className="text-gray-400 hover:text-white transition"
+                            >
+                                <ArrowLeft size={24} />
+                            </button>
+                            <h1 className="text-2xl font-bold text-fantasy-gold">
+                                🎲 AI Dungeon Master
+                            </h1>
+                        </div>
                         <div className="text-sm text-gray-400">
                             Session: {sessionId.slice(0, 8)}...
                         </div>
@@ -239,6 +242,7 @@ function GameScreen({ sessionId, initialGameData }) {
                                 </div>
                             )}
                         </div>
+                        
                         {/* Combat Test Button */}
                         <div className="mt-4">
                             <button
