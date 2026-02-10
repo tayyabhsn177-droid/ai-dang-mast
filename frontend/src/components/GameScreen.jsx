@@ -153,7 +153,7 @@ function GameScreen({ sessionId, initialGameData }) {
                             {/* Inventory */}
                             <div>
                                 <h3 className="text-sm font-semibold mb-2 text-gray-400">🎒 Inventory</h3>
-                                <div className="bg-gray-900 rounded-lg p-3 min-h-[80px]">
+                                <div className="bg-gray-900 rounded-lg p-3 min-h-20">
                                     {gameData.player_stats.inventory && gameData.player_stats.inventory.length > 0 ? (
                                         <div className="flex flex-wrap gap-2">
                                             {gameData.player_stats.inventory.map((item, index) => (

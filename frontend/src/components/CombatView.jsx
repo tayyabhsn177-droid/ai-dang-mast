@@ -166,7 +166,7 @@ function CombatView({ sessionId, onCombatEnd }) {
                     initial={{ width: 0 }}
                     animate={{ width: `${(combatData.player_stats.hp / combatData.player_stats.max_hp) * 100}%` }}
                     transition={{ duration: 0.5 }}
-                    className="h-full bg-gradient-to-r from-red-600 to-red-500"
+                    className="h-full bg-linear-to-r from-red-600 to-red-500"
                   />
                 </div>
               </div>
@@ -182,7 +182,7 @@ function CombatView({ sessionId, onCombatEnd }) {
                     initial={{ width: 0 }}
                     animate={{ width: `${(combatData.player_stats.mana / combatData.player_stats.max_mana) * 100}%` }}
                     transition={{ duration: 0.5 }}
-                    className="h-full bg-gradient-to-r from-blue-600 to-blue-500"
+                    className="h-full bg-linear-to-r from-blue-600 to-blue-500"
                   />
                 </div>
               </div>
@@ -198,7 +198,7 @@ function CombatView({ sessionId, onCombatEnd }) {
                     initial={{ width: 0 }}
                     animate={{ width: `${(combatData.player_stats.stamina / combatData.player_stats.max_stamina) * 100}%` }}
                     transition={{ duration: 0.5 }}
-                    className="h-full bg-gradient-to-r from-orange-600 to-orange-500"
+                    className="h-full bg-linear-to-r from-orange-600 to-orange-500"
                   />
                 </div>
               </div>
@@ -287,7 +287,7 @@ function CombatView({ sessionId, onCombatEnd }) {
                         <motion.div 
                           animate={{ width: `${(enemy.hp / enemy.max_hp) * 100}%` }}
                           transition={{ duration: 0.5 }}
-                          className="h-full bg-gradient-to-r from-red-600 to-red-500"
+                          className="h-full bg-linear-to-r from-red-600 to-red-500"
                         />
                       </div>
                     </div>
