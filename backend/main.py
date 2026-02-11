@@ -15,7 +15,7 @@ from services.combat_system import CombatSystem
 # Initialize logging first
 init_logging()
 
-from graph_builder import build_graph
+from backend.graph_builder import build_graph
 
 app = FastAPI(
     title="AI Dungeon Master", 
